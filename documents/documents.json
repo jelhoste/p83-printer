@@ -1,0 +1,38 @@
+{
+  "name": "Documents",
+  "type": "folder",
+  "children": [
+    {
+      "name": "Factures",
+      "type": "folder",
+      "path": "factures",
+      "children": [
+        {
+          "name": "Exemple Facture 2026-01.pdf",
+          "type": "file",
+          "path": "factures/exemple-facture.pdf",
+          "size": "Exemple"
+        }
+      ]
+    },
+    {
+      "name": "Notes",
+      "type": "folder",
+      "path": "notes",
+      "children": [
+        {
+          "name": "Réunion équipe.pdf",
+          "type": "file",
+          "path": "notes/reunion.pdf",
+          "size": "Exemple"
+        }
+      ]
+    },
+    {
+      "name": "Divers",
+      "type": "folder",
+      "path": "divers",
+      "children": []
+    }
+  ]
+}

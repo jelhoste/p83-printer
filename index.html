@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0f172a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>P83 Thermal Printer</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="style.css" />
+  <!-- PDF.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs" type="module"></script>
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <h1>P83 Print</h1>
+        <span id="connection-status" class="status-badge offline">Déconnecté</span>
+      </div>
+      <button id="btn-connect" class="btn btn-primary">
+        <span class="icon">🔌</span>
+        <span class="btn-text">Connecter</span>
+      </button>
+    </header>
+
+    <!-- Main content -->
+    <main class="main">
+      <!-- Source selection -->
+      <section class="card">
+        <h2>Source du document</h2>
+        <div class="source-tabs">
+          <button class="tab active" data-source="local">📱 Local</button>
+          <button class="tab" data-source="hosted">☁️ Hébergé</button>
+        </div>
+
+        <!-- Local source -->
+        <div id="panel-local" class="panel active">
+          <label class="file-drop" for="file-input">
+            <input type="file" id="file-input" accept="application/pdf" />
+            <div class="file-drop-content">
+              <span class="big-icon">📄</span>
+              <p>Touchez pour choisir un PDF<br><small>ou glissez-déposez</small></p>
+            </div>
+          </label>
+          <p id="local-filename" class="filename"></p>
+        </div>
+
+        <!-- Hosted source -->
+        <div id="panel-hosted" class="panel">
+          <div class="breadcrumb" id="breadcrumb">
+            <button class="crumb" data-path="">Documents</button>
+          </div>
+          <div id="folder-list" class="folder-list">
+            <p class="loading">Chargement...</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Preview & Print -->
+      <section class="card" id="preview-section" style="display:none;">
+        <h2>Aperçu</h2>
+        <div class="preview-controls">
+          <button id="btn-prev-page" class="btn btn-secondary" disabled>◀</button>
+          <span id="page-info">Page 1 / 1</span>
+          <button id="btn-next-page" class="btn btn-secondary" disabled>▶</button>
+        </div>
+        <div class="preview-container">
+          <canvas id="preview-canvas"></canvas>
+        </div>
+
+        <div class="print-options">
+          <label>
+            Densité
+            <select id="print-density">
+              <option value="1">Faible</option>
+              <option value="2" selected>Normale</option>
+              <option value="3">Forte</option>
+            </select>
+          </label>
+          <label>
+            Largeur papier
+            <select id="paper-width">
+              <option value="216" selected>A4 (216 mm)</option>
+              <option value="110">110 mm</option>
+              <option value="80">80 mm</option>
+              <option value="53">53 mm</option>
+            </select>
+          </label>
+        </div>
+
+        <button id="btn-print" class="btn btn-print" disabled>
+          🖨️ Imprimer cette page
+        </button>
+        <button id="btn-print-all" class="btn btn-secondary" disabled>
+          Imprimer tout le document
+        </button>
+      </section>
+
+      <!-- Log / Status -->
+      <section class="card log-card">
+        <h2>Journal</h2>
+        <div id="log" class="log"></div>
+      </section>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
