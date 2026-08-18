@@ -208,43 +208,57 @@ async function sendBytes(data) {
   }
 }
 
-/** Simple text test – tries ALL writable characteristics */
+/** Commandes famille ff00 / LuckPrinter-like (P83C) */
+function cmdWake() {
+  return new Uint8Array(12); // 12 octets nuls
+}
+function cmdEnableVariants() {
+  return [
+    new Uint8Array([0x10, 0xFF, 0xF1, 0x03]),
+    new Uint8Array([0x10, 0xFF, 0xF1, 0x02]),
+    new Uint8Array([0x10, 0xFF, 0xF1, 0x00]),
+  ];
+}
+function cmdStop() {
+  return new Uint8Array([0x10, 0xFF, 0xF1, 0x45]);
+}
+function cmdFeedDots(n = 80) {
+  return new Uint8Array([0x1B, 0x4A, n & 0xFF]);
+}
+
+/** Test texte avec protocole d’activation P83C */
 async function printTestText() {
   if (!state.connected) {
     log('Connectez d’abord l’imprimante', 'error');
     return;
   }
-  if (!state.allWritableChars.length) {
-    log('Aucune caractéristique disponible', 'error');
-    return;
-  }
 
   const encoder = new TextEncoder();
-  const init = new Uint8Array([0x1B, 0x40]);
-  const text = encoder.encode('\n*** TEST P83 ***\nImpression OK\n\n\n\n');
-  const payload = new Uint8Array(init.length + text.length);
-  payload.set(init, 0);
-  payload.set(text, init.length);
+  const text = encoder.encode('*** TEST P83C ***\nImpression OK\n\n');
+  const escInit = new Uint8Array([0x1B, 0x40]);
 
-  log(`Test sur ${state.allWritableChars.length} caractéristique(s)…`);
+  log('Test protocole P83C (activation + texte)…');
 
-  for (let i = 0; i < state.allWritableChars.length; i++) {
-    const char = state.allWritableChars[i];
-    log(`Essai ${i + 1}/${state.allWritableChars.length} : ${char.uuid}`);
-    try {
-      // temporarily use this characteristic
-      const previous = state.characteristic;
-      state.characteristic = char;
-      await sendBytes(payload);
-      state.characteristic = previous;
-      log(`  → Données envoyées sur ${char.uuid}`, 'success');
-      // pause so user can see if something printed
-      await new Promise(r => setTimeout(r, 1500));
-    } catch (err) {
-      log(`  → Échec : ${err.message}`, 'error');
+  try {
+    await sendBytes(cmdWake());
+    await new Promise(r => setTimeout(r, 120));
+
+    for (const enable of cmdEnableVariants()) {
+      const hex = Array.from(enable).map(b => b.toString(16).padStart(2, '0')).join(' ');
+      log(`Activation: ${hex}`);
+      await sendBytes(enable);
+      await new Promise(r => setTimeout(r, 100));
     }
+
+    await sendBytes(escInit);
+    await sendBytes(text);
+    await sendBytes(cmdFeedDots(60));
+    await sendBytes(cmdStop());
+
+    log('Test envoyé – regardez si du texte sort', 'success');
+  } catch (err) {
+    log(`Erreur test : ${err.message}`, 'error');
   }
-  log('Fin des tests. Si rien n’est sorti, le protocole BLE de cette P83 n’est probablement pas standard.', 'info');
 }
 
 // ========== ESC/POS helpers ==========
@@ -371,12 +385,15 @@ async function printCurrentPage() {
     const density = parseInt(el.density.value, 10);
     const raster = canvasToEscPosRaster(el.previewCanvas, density);
 
-    // Init + optional wake (helps some Chinese portable printers)
+    // Protocole P83C / famille ff00
+    await sendBytes(cmdWake());
+    await new Promise(r => setTimeout(r, 80));
+    await sendBytes(cmdEnableVariants()[0]); // 10 FF F1 03
+    await new Promise(r => setTimeout(r, 80));
     await sendBytes(escposInit());
-    // small wake / null padding sometimes required
-    await sendBytes(new Uint8Array(8));
     await sendBytes(raster);
-    await sendBytes(escposFeed(4));
+    await sendBytes(cmdFeedDots(40));
+    await sendBytes(cmdStop());
 
     log(`Page ${state.currentPage} envoyée – vérifiez l’imprimante`, 'success');
   } catch (err) {
@@ -395,17 +412,20 @@ async function printAllPages() {
     el.btnPrint.disabled = true;
     log(`Impression de tout le document (${state.totalPages} pages)…`);
 
+    await sendBytes(cmdWake());
+    await sendBytes(cmdEnableVariants()[0]);
+
     for (let i = 1; i <= state.totalPages; i++) {
       await renderPage(i);
-      // small pause so UI updates
       await new Promise(r => setTimeout(r, 100));
       const density = parseInt(el.density.value, 10);
       const raster = canvasToEscPosRaster(el.previewCanvas, density);
       await sendBytes(escposInit());
       await sendBytes(raster);
-      await sendBytes(escposFeed(5));
+      await sendBytes(cmdFeedDots(40));
       log(`Page ${i}/${state.totalPages} envoyée`);
     }
+    await sendBytes(cmdStop());
     log('Document entièrement imprimé', 'success');
   } catch (err) {
     log(`Erreur : ${err.message}`, 'error');

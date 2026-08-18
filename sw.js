@@ -1,4 +1,4 @@
-const CACHE_NAME = 'p83-print-v2';
+const CACHE_NAME = 'p83-print-v3';
 const ASSETS = [
   './',
   './index.html',
