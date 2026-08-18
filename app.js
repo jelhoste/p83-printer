@@ -38,6 +38,7 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 const el = {
   btnConnect: $('#btn-connect'),
+  btnTest: $('#btn-test'),
   statusBadge: $('#connection-status'),
   fileInput: $('#file-input'),
   localFilename: $('#local-filename'),
@@ -153,7 +154,8 @@ async function connectPrinter() {
     state.server = server;
     state.characteristic = characteristic;
     setConnected(true);
-    log('Imprimante prête !', 'success');
+    log(`Imprimante prête ! (UUID: ${characteristic.uuid})`, 'success');
+    log(`WriteWithoutResponse: ${characteristic.properties.writeWithoutResponse} | Write: ${characteristic.properties.write}`);
   } catch (err) {
     log(`Erreur connexion : ${err.message}`, 'error');
     console.error(err);
@@ -183,16 +185,54 @@ function onDisconnected() {
 async function sendBytes(data) {
   if (!state.characteristic) throw new Error('Pas de connexion');
 
-  const chunkSize = 512; // safe for most BLE
+  // Many cheap thermal printers are sensitive to packet size.
+  // Try small chunks first (more reliable than 512).
+  const chunkSize = 100;
+  const delayMs = 40;
+
   for (let i = 0; i < data.length; i += chunkSize) {
     const chunk = data.slice(i, i + chunkSize);
-    if (state.characteristic.properties.writeWithoutResponse) {
-      await state.characteristic.writeValueWithoutResponse(chunk);
-    } else {
-      await state.characteristic.writeValue(chunk);
+    try {
+      if (state.characteristic.properties.writeWithoutResponse) {
+        await state.characteristic.writeValueWithoutResponse(chunk);
+      } else {
+        await state.characteristic.writeValue(chunk);
+      }
+    } catch (e) {
+      // fallback to the other write mode
+      try {
+        if (state.characteristic.properties.write) {
+          await state.characteristic.writeValue(chunk);
+        } else {
+          await state.characteristic.writeValueWithoutResponse(chunk);
+        }
+      } catch (e2) {
+        throw e2;
+      }
     }
-    // small delay to avoid overwhelming the printer
-    await new Promise(r => setTimeout(r, 20));
+    await new Promise(r => setTimeout(r, delayMs));
+  }
+}
+
+/** Simple text test – very useful to verify the write characteristic is correct */
+async function printTestText() {
+  if (!state.connected) {
+    log('Connectez d’abord l’imprimante', 'error');
+    return;
+  }
+  try {
+    log('Envoi test texte…');
+    const encoder = new TextEncoder();
+    // ESC @ (init) + text + line feeds
+    const init = new Uint8Array([0x1B, 0x40]);
+    const text = encoder.encode('\n*** TEST P83 ***\nImpression OK\n\n\n\n');
+    const payload = new Uint8Array(init.length + text.length);
+    payload.set(init, 0);
+    payload.set(text, init.length);
+    await sendBytes(payload);
+    log('Test texte envoyé – regardez si quelque chose s’imprime', 'success');
+  } catch (err) {
+    log(`Erreur test : ${err.message}`, 'error');
   }
 }
 
@@ -320,11 +360,14 @@ async function printCurrentPage() {
     const density = parseInt(el.density.value, 10);
     const raster = canvasToEscPosRaster(el.previewCanvas, density);
 
+    // Init + optional wake (helps some Chinese portable printers)
     await sendBytes(escposInit());
+    // small wake / null padding sometimes required
+    await sendBytes(new Uint8Array(8));
     await sendBytes(raster);
     await sendBytes(escposFeed(4));
 
-    log(`Page ${state.currentPage} envoyée`, 'success');
+    log(`Page ${state.currentPage} envoyée – vérifiez l’imprimante`, 'success');
   } catch (err) {
     log(`Erreur impression : ${err.message}`, 'error');
     console.error(err);
@@ -452,6 +495,7 @@ async function openHostedPdf(item) {
 
 // ========== Events ==========
 el.btnConnect.addEventListener('click', connectPrinter);
+el.btnTest.addEventListener('click', printTestText);
 
 el.fileInput.addEventListener('change', async (e) => {
   const file = e.target.files?.[0];
