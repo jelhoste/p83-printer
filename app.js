@@ -12,6 +12,7 @@ const state = {
   device: null,
   server: null,
   characteristic: null,
+  allWritableChars: [], // all writable characteristics found
   connected: false,
   pdfDoc: null,
   currentPage: 1,
@@ -19,7 +20,7 @@ const state = {
   currentSource: 'local',
   currentFolderPath: [],
   documentsTree: null,
-  selectedFile: null, // { name, url or ArrayBuffer }
+  selectedFile: null,
 };
 
 // Common BLE service / characteristic UUIDs used by many Chinese thermal printers
@@ -107,55 +108,48 @@ async function connectPrinter() {
     device.addEventListener('gattserverdisconnected', onDisconnected);
 
     const server = await device.gatt.connect();
-    log('GATT connecté, recherche du service…');
+    log('GATT connecté, découverte de tous les services…');
 
-    let characteristic = null;
+    const services = await server.getPrimaryServices();
+    const writableChars = [];
 
-    // Try known services first
-    for (const uuid of PRINTER_SERVICE_UUIDS) {
+    for (const service of services) {
+      log(`Service: ${service.uuid}`);
       try {
-        const service = await server.getPrimaryService(uuid);
         const chars = await service.getCharacteristics();
         for (const c of chars) {
+          const props = [];
+          if (c.properties.read) props.push('read');
+          if (c.properties.write) props.push('write');
+          if (c.properties.writeWithoutResponse) props.push('writeNoResp');
+          if (c.properties.notify) props.push('notify');
+          log(`  → Char: ${c.uuid} [${props.join(', ')}]`);
+
           if (c.properties.write || c.properties.writeWithoutResponse) {
-            characteristic = c;
-            log(`Caractéristique trouvée (${uuid})`);
-            break;
+            writableChars.push(c);
           }
         }
-        if (characteristic) break;
       } catch (e) {
-        // service not present
+        log(`  (impossible de lire les caractéristiques de ce service)`);
       }
     }
 
-    // Fallback: explore all services
-    if (!characteristic) {
-      log('Recherche élargie des services…');
-      const services = await server.getPrimaryServices();
-      for (const service of services) {
-        const chars = await service.getCharacteristics();
-        for (const c of chars) {
-          if (c.properties.write || c.properties.writeWithoutResponse) {
-            characteristic = c;
-            log(`Caractéristique générique trouvée`);
-            break;
-          }
-        }
-        if (characteristic) break;
-      }
+    if (writableChars.length === 0) {
+      throw new Error('Aucune caractéristique d’écriture trouvée. L’imprimante expose peut-être seulement du Bluetooth Classic (SPP), non supporté par Web Bluetooth.');
     }
 
-    if (!characteristic) {
-      throw new Error('Aucune caractéristique d’écriture trouvée. L’imprimante n’est peut-être pas compatible Web Bluetooth (BLE).');
-    }
+    // Prefer known printer UUIDs if present
+    let characteristic = writableChars.find(c =>
+      PRINTER_SERVICE_UUIDS.some(u => c.service.uuid.includes(u.slice(4, 8)) || c.uuid.includes('2af1') || c.uuid.includes('ffe1') || c.uuid.includes('ff02'))
+    ) || writableChars[0];
 
     state.device = device;
     state.server = server;
     state.characteristic = characteristic;
+    state.allWritableChars = writableChars;
     setConnected(true);
-    log(`Imprimante prête ! (UUID: ${characteristic.uuid})`, 'success');
-    log(`WriteWithoutResponse: ${characteristic.properties.writeWithoutResponse} | Write: ${characteristic.properties.write}`);
+    log(`${writableChars.length} caractéristique(s) d’écriture trouvée(s)`, 'success');
+    log(`Utilisation de : ${characteristic.uuid}`, 'success');
   } catch (err) {
     log(`Erreur connexion : ${err.message}`, 'error');
     console.error(err);
@@ -214,26 +208,43 @@ async function sendBytes(data) {
   }
 }
 
-/** Simple text test – very useful to verify the write characteristic is correct */
+/** Simple text test – tries ALL writable characteristics */
 async function printTestText() {
   if (!state.connected) {
     log('Connectez d’abord l’imprimante', 'error');
     return;
   }
-  try {
-    log('Envoi test texte…');
-    const encoder = new TextEncoder();
-    // ESC @ (init) + text + line feeds
-    const init = new Uint8Array([0x1B, 0x40]);
-    const text = encoder.encode('\n*** TEST P83 ***\nImpression OK\n\n\n\n');
-    const payload = new Uint8Array(init.length + text.length);
-    payload.set(init, 0);
-    payload.set(text, init.length);
-    await sendBytes(payload);
-    log('Test texte envoyé – regardez si quelque chose s’imprime', 'success');
-  } catch (err) {
-    log(`Erreur test : ${err.message}`, 'error');
+  if (!state.allWritableChars.length) {
+    log('Aucune caractéristique disponible', 'error');
+    return;
   }
+
+  const encoder = new TextEncoder();
+  const init = new Uint8Array([0x1B, 0x40]);
+  const text = encoder.encode('\n*** TEST P83 ***\nImpression OK\n\n\n\n');
+  const payload = new Uint8Array(init.length + text.length);
+  payload.set(init, 0);
+  payload.set(text, init.length);
+
+  log(`Test sur ${state.allWritableChars.length} caractéristique(s)…`);
+
+  for (let i = 0; i < state.allWritableChars.length; i++) {
+    const char = state.allWritableChars[i];
+    log(`Essai ${i + 1}/${state.allWritableChars.length} : ${char.uuid}`);
+    try {
+      // temporarily use this characteristic
+      const previous = state.characteristic;
+      state.characteristic = char;
+      await sendBytes(payload);
+      state.characteristic = previous;
+      log(`  → Données envoyées sur ${char.uuid}`, 'success');
+      // pause so user can see if something printed
+      await new Promise(r => setTimeout(r, 1500));
+    } catch (err) {
+      log(`  → Échec : ${err.message}`, 'error');
+    }
+  }
+  log('Fin des tests. Si rien n’est sorti, le protocole BLE de cette P83 n’est probablement pas standard.', 'info');
 }
 
 // ========== ESC/POS helpers ==========
